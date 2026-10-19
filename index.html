@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1b2d">
+<link rel="manifest" href="manifest.json">
+<title>Sigma Chat</title>
+<style>
+/* >>> REMPLACEZ ICI par les couleurs de Sigma Exchange <<< */
+:root{
+  --bg:#0b1422; --panel:#121f33; --panel2:#1a2b45; --text:#e8eef7; --muted:#8fa3bf;
+  --accent:#e0b04a; --accent-text:#1a1405; --bubble-out:#1f4a7a; --bubble-in:#1a2b45; --line:#243754;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.4 system-ui,sans-serif;display:flex;flex-direction:column;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+header{background:var(--panel);padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line)}
+header h1{font-size:19px;flex:1}
+header button{background:none;border:0;color:var(--text);font-size:20px;cursor:pointer}
+main{flex:1;overflow-y:auto}
+nav{display:flex;background:var(--panel);border-top:1px solid var(--line)}
+nav button{flex:1;padding:12px 0;background:none;border:0;color:var(--muted);font-size:13px;cursor:pointer}
+nav button.on{color:var(--accent);font-weight:600}
+.view{display:none}.view.on{display:block}
+.row{display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer}
+.av{width:46px;height:46px;border-radius:50%;background:var(--panel2);color:var(--accent);display:grid;place-items:center;font-weight:700;flex:none}
+.row b{display:block}.row small{color:var(--muted)}
+.feed{display:grid;gap:14px;padding:14px}
+.card{background:var(--panel);border-radius:12px;overflow:hidden}
+.thumb{aspect-ratio:16/9;background:linear-gradient(135deg,var(--panel2),var(--bg));display:grid;place-items:center;font-size:40px;color:var(--accent)}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.card .meta{padding:10px 12px;display:flex;gap:10px}
+.card .meta small{color:var(--muted)}
+#chat{position:fixed;inset:0;background:var(--bg);display:none;flex-direction:column;z-index:5;
+  padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+#chat.on{display:flex}
+#msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:6px}
+.m{max-width:78%;padding:8px 12px;border-radius:12px;background:var(--bubble-in)}
+.m.me{align-self:flex-end;background:var(--bubble-out)}
+.m small{display:block;color:var(--muted);font-size:11px;text-align:right}
+form{display:flex;gap:8px;padding:8px;background:var(--panel)}
+form input{flex:1;padding:11px 14px;border-radius:22px;border:0;background:var(--panel2);color:var(--text);font-size:15px}
+form button{width:44px;border:0;border-radius:50%;background:var(--accent);color:var(--accent-text);font-size:18px;cursor:pointer}
+.login{padding:24px;display:grid;gap:12px}
+.login input{padding:12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--text)}
+.login button{padding:12px;border:0;border-radius:8px;background:var(--accent);color:var(--accent-text);font-weight:700}
+</style>
+</head>
+<body>
+<header><h1 id="title">Discussions</h1><button id="out" title="Quitter" hidden>⎋</button></header>
+<main>
+  <section class="view on" id="v-login"><div class="login">
+    <h2>Bienvenue sur Sigma Chat</h2>
+    <input id="pseudo" placeholder="Votre pseudo (ou nom du compte Sigma)">
+    <button id="go">Entrer</button></div></section>
+  <section class="view" id="v-chats"></section>
+  <section class="view" id="v-feed"><div class="feed" id="feed"></div></section>
+  <section class="view" id="v-me"><div class="login"><h2 id="me-name"></h2><p style="color:var(--muted)">Connecté à Sigma Exchange</p></div></section>
+</main>
+<nav id="nav" hidden>
+  <button data-v="chats" class="on">Discussions</button>
+  <button data-v="feed">Découvrir</button>
+  <button data-v="me">Profil</button>
+</nav>
+<div id="chat">
+  <header><button id="back">←</button><div class="av" id="c-av"></div><h1 id="c-name"></h1></header>
+  <div id="msgs"></div>
+  <form id="f"><input id="t" placeholder="Message" autocomplete="off"><button>➤</button></form>
+</div>
+<script>
+// ---- Réglages : adaptez les URLs aux routes de votre serveur ----
+const API = location.origin;                 // en APK Capacitor : mettre https://sigma-exchange.onrender.com
+const ROOMS = [{id:'general',name:'Général Sigma'},{id:'bourse',name:'Bourse'},{id:'cartes',name:'Cartes & échanges'}];
+// -----------------------------------------------------------------
+const $=s=>document.querySelector(s); let me=localStorage.getItem('pseudo'), room=null, socket=null;
+const hist={}; // repli local si le serveur de chat est absent
+
+function show(v){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id==='v-'+v));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  $('#title').textContent={chats:'Discussions',feed:'Découvrir',me:'Profil',login:'Sigma Chat'}[v];}
+function start(){ $('#nav').hidden=false; $('#out').hidden=false; $('#me-name').textContent=me;
+  $('#v-chats').innerHTML=ROOMS.map(r=>`<div class="row" data-r="${r.id}"><div class="av">${r.name[0]}</div><div><b>${r.name}</b><small>Appuyez pour discuter</small></div></div>`).join('');
+  show('chats'); loadFeed(); connect(); }
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function loadFeed(){
+  let items=[]; try{ items=await (await fetch(API+'/api/feed')).json(); }catch(e){}
+  if(!items.length) items=['Entreprise Alpha','Carte Légendaire','Entreprise Beta'].map(t=>({title:t,subtitle:'Données de démonstration'}));
+  $('#feed').innerHTML=items.map(i=>`<div class="card"><div class="thumb">${i.image?`<img src="${esc(i.image)}" alt="">`:'Σ'}</div>
+    <div class="meta"><div class="av" style="width:36px;height:36px">${esc(i.title)[0]}</div><div><b>${esc(i.title)}</b><br><small>${esc(i.subtitle)}</small></div></div></div>`).join('');}
+function connect(){ if(!window.io) return; socket=io(API); socket.on('message',m=>{ if(m.room===room) add(m); }); }
+function add(m){ const d=document.createElement('div'); d.className='m'+(m.user===me?' me':'');
+  d.innerHTML=(m.user===me?'':`<b style="color:var(--accent);font-size:12px">${m.user}</b>`)+`<div></div><small>${new Date(m.at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</small>`;
+  d.children[m.user===me?0:1].textContent=m.text; $('#msgs').append(d); $('#msgs').scrollTop=1e9; }
+async function open(id){ room=id; const r=ROOMS.find(x=>x.id===id); $('#c-name').textContent=r.name; $('#c-av').textContent=r.name[0];
+  $('#msgs').innerHTML=''; $('#chat').classList.add('on'); let h=hist[id]||[];
+  try{ h=await (await fetch(`${API}/api/social/messages/${id}`)).json(); }catch(e){}
+  h.forEach(add); socket&&socket.emit('join',id); }
+$('#go').onclick=()=>{ const p=$('#pseudo').value.trim(); if(!p) return; me=p; localStorage.setItem('pseudo',p); start(); };
+$('#out').onclick=()=>{ localStorage.removeItem('pseudo'); location.reload(); };
+$('#nav').onclick=e=>e.target.dataset.v&&show(e.target.dataset.v);
+$('#v-chats').onclick=e=>{const r=e.target.closest('.row'); r&&open(r.dataset.r);};
+$('#back').onclick=()=>{ $('#chat').classList.remove('on'); room=null; };
+$('#f').onsubmit=e=>{ e.preventDefault(); const text=$('#t').value.trim(); if(!text) return; $('#t').value='';
+  const m={room,user:me,text,at:Date.now()};
+  if(socket&&socket.connected) socket.emit('message',m); else { (hist[room]=hist[room]||[]).push(m); add(m); } };
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+if(me) start();
+</script>
+<script src="/socket.io/socket.io.js" onerror="console.log('Chat temps réel indisponible : mode local')"></script>
+</body>
+</html>
