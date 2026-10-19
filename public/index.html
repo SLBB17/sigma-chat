@@ -53,8 +53,10 @@ form button{width:44px;border:0;border-radius:50%;background:var(--accent);color
 <main>
   <section class="view on" id="v-login"><div class="login">
     <h2>Bienvenue sur Sigma Chat</h2>
-    <input id="pseudo" placeholder="Votre pseudo (ou nom du compte Sigma)">
-    <button id="go">Entrer</button></div></section>
+    <input id="email" type="email" placeholder="E-mail de votre compte Sigma Exchange" autocomplete="username">
+    <input id="pwd" type="password" placeholder="Mot de passe" autocomplete="current-password">
+    <p id="err" style="color:#ff7a7a;min-height:1.2em"></p>
+    <button id="go">Se connecter</button></div></section>
   <section class="view" id="v-chats"></section>
   <section class="view" id="v-feed"><div class="feed" id="feed"></div></section>
   <section class="view" id="v-me"><div class="login"><h2 id="me-name"></h2><p style="color:var(--muted)">Connecté à Sigma Exchange</p></div></section>
@@ -74,7 +76,7 @@ form button{width:44px;border:0;border-radius:50%;background:var(--accent);color
 const API = location.origin;                 // en APK Capacitor : mettre https://sigma-exchange.onrender.com
 const ROOMS = [{id:'general',name:'Général Sigma'},{id:'bourse',name:'Bourse'},{id:'cartes',name:'Cartes & échanges'}];
 // -----------------------------------------------------------------
-const $=s=>document.querySelector(s); let me=localStorage.getItem('pseudo'), room=null, socket=null;
+const $=s=>document.querySelector(s); let me=localStorage.getItem('pseudo'), token=localStorage.getItem('token'), room=null, socket=null;
 const hist={}; // repli local si le serveur de chat est absent
 
 function show(v){document.querySelectorAll('.view').forEach(e=>e.classList.toggle('on',e.id==='v-'+v));
@@ -89,16 +91,23 @@ async function loadFeed(){
   if(!items.length) items=['Entreprise Alpha','Carte Légendaire','Entreprise Beta'].map(t=>({title:t,subtitle:'Données de démonstration'}));
   $('#feed').innerHTML=items.map(i=>`<div class="card"><div class="thumb">${i.image?`<img src="${esc(i.image)}" alt="">`:'Σ'}</div>
     <div class="meta"><div class="av" style="width:36px;height:36px">${esc(i.title)[0]}</div><div><b>${esc(i.title)}</b><br><small>${esc(i.subtitle)}</small></div></div></div>`).join('');}
-function connect(){ if(!window.io) return; socket=io(API); socket.on('message',m=>{ if(m.room===room) add(m); }); }
+function connect(){ if(!window.io) return; socket=io(API,{auth:{token}}); socket.on('connect_error',e=>{ if(e.message==='auth') logout(); }); socket.on('message',m=>{ if(m.room===room) add(m); }); }
 function add(m){ const d=document.createElement('div'); d.className='m'+(m.user===me?' me':'');
   d.innerHTML=(m.user===me?'':`<b style="color:var(--accent);font-size:12px">${m.user}</b>`)+`<div></div><small>${new Date(m.at).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</small>`;
   d.children[m.user===me?0:1].textContent=m.text; $('#msgs').append(d); $('#msgs').scrollTop=1e9; }
 async function open(id){ room=id; const r=ROOMS.find(x=>x.id===id); $('#c-name').textContent=r.name; $('#c-av').textContent=r.name[0];
   $('#msgs').innerHTML=''; $('#chat').classList.add('on'); let h=hist[id]||[];
-  try{ h=await (await fetch(`${API}/api/social/messages/${id}`)).json(); }catch(e){}
+  try{ h=await (await fetch(`${API}/api/social/messages/${id}`,{headers:{Authorization:'Bearer '+token}})).json(); }catch(e){}
   h.forEach(add); socket&&socket.emit('join',id); }
-$('#go').onclick=()=>{ const p=$('#pseudo').value.trim(); if(!p) return; me=p; localStorage.setItem('pseudo',p); start(); };
-$('#out').onclick=()=>{ localStorage.removeItem('pseudo'); location.reload(); };
+async function login(){
+  const email=$('#email').value.trim(), password=$('#pwd').value; if(!email||!password) return; $('#err').textContent='';
+  try{ const r=await fetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||'Identifiants incorrects');
+    me=d.user.name; token=d.token; localStorage.setItem('pseudo',me); localStorage.setItem('token',token); start(); }
+  catch(e){ $('#err').textContent=e.message||'Connexion impossible'; } }
+function logout(){ localStorage.removeItem('pseudo'); localStorage.removeItem('token'); location.reload(); }
+$('#go').onclick=login; $('#pwd').onkeydown=e=>{ if(e.key==='Enter') login(); };
+$('#out').onclick=logout;
 $('#nav').onclick=e=>e.target.dataset.v&&show(e.target.dataset.v);
 $('#v-chats').onclick=e=>{const r=e.target.closest('.row'); r&&open(r.dataset.r);};
 $('#back').onclick=()=>{ $('#chat').classList.remove('on'); room=null; };
@@ -106,7 +115,7 @@ $('#f').onsubmit=e=>{ e.preventDefault(); const text=$('#t').value.trim(); if(!t
   const m={room,user:me,text,at:Date.now()};
   if(socket&&socket.connected) socket.emit('message',m); else { (hist[room]=hist[room]||[]).push(m); add(m); } };
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
-if(me) start();
+if(me&&token) start();
 </script>
 <script src="/socket.io/socket.io.js" onerror="console.log('Chat temps réel indisponible : mode local')"></script>
 </body>
